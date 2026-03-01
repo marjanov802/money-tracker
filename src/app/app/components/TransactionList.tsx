@@ -30,7 +30,7 @@ export default function TransactionList({ transactions, onEdit, showDate = false
     const sortedTransactions = [...transactions].sort((a, b) => {
         const dateCompare = b.date.localeCompare(a.date)
         if (dateCompare !== 0) return dateCompare
-        return b.createdAt.localeCompare(a.createdAt)
+        return b.created_at.localeCompare(a.created_at)
     })
 
     return (
