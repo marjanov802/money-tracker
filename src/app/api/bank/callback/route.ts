@@ -5,10 +5,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { exchangeCode, expiresAt, parseState } from '@/lib/truelayer'
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY! // service role bypasses RLS for server writes
-)
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY! // service role bypasses RLS for server writes
+    )
+}
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
@@ -19,11 +21,11 @@ export async function GET(req: NextRequest) {
     // User denied consent or something went wrong at TrueLayer
     if (error) {
         console.error('TrueLayer auth error:', error)
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?bank_error=${error}`)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=${error}`)
     }
 
     if (!code || !state) {
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?bank_error=missing_params`)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=missing_params`)
     }
 
     let userId: string
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest) {
             throw new Error('State expired')
         }
     } catch (e) {
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?bank_error=invalid_state`)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=invalid_state`)
     }
 
     // Exchange code for tokens
@@ -44,10 +46,11 @@ export async function GET(req: NextRequest) {
         tokens = await exchangeCode(code)
     } catch (e) {
         console.error('Token exchange error:', e)
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?bank_error=token_exchange_failed`)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=token_exchange_failed`)
     }
 
     // Save connection to Supabase
+    const supabase = getSupabase()
     const { data: connection, error: dbError } = await supabase
         .from('bank_connections')
         .upsert(
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
 
     if (dbError || !connection) {
         console.error('DB save error:', dbError)
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?bank_error=db_error`)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=db_error`)
     }
 
     // Kick off initial sync (accounts + transactions) in the background
@@ -77,5 +80,5 @@ export async function GET(req: NextRequest) {
         body: JSON.stringify({ userId }),
     }).catch(err => console.error('Background sync trigger failed:', err))
 
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_error=${error}`)
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app?bank_connected=true`)
 }

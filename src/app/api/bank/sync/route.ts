@@ -12,12 +12,15 @@ import {
     expiresAt,
 } from '@/lib/truelayer'
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+}
 
 async function getValidAccessToken(userId: string): Promise<{ token: string; connectionId: string } | null> {
+    const supabase = getSupabase()
     const { data: conn, error } = await supabase
         .from('bank_connections')
         .select('id, access_token, refresh_token, expires_at, status')
@@ -84,6 +87,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { token, connectionId } = tokenData
+    const supabase = getSupabase()
 
     // ── Step 5: Fetch accounts ─────────────────────────────────────────────────
     let accounts

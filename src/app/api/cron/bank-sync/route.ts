@@ -1,13 +1,15 @@
 // app/api/cron/bank-sync/route.ts
-// Step 8: Scheduled sync — Vercel calls this every 6 hours via vercel.json cron
+// Step 8: Scheduled sync — Vercel calls this every day via vercel.json cron
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+}
 
 export async function GET(req: NextRequest) {
     // Vercel cron sends this header — reject anything without it
@@ -15,6 +17,8 @@ export async function GET(req: NextRequest) {
     if (cronSecret !== `Bearer ${process.env.CRON_SECRET}`) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const supabase = getSupabase()
 
     // Get all active connections that haven't been synced in the last 4 hours
     const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()

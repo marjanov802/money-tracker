@@ -3,15 +3,18 @@ import { auth } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+}
 
 export async function GET() {
     const { userId } = await auth()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const supabase = getSupabase()
     const { data, error } = await supabase
         .from('transactions')
         .select('*')
@@ -30,6 +33,7 @@ export async function POST(req: Request) {
     const { userId } = await auth()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const supabase = getSupabase()
     const body = await req.json()
 
     const { data, error } = await supabase
@@ -46,6 +50,7 @@ export async function PATCH(req: Request) {
     const { userId } = await auth()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const supabase = getSupabase()
     const { id, ...updates } = await req.json()
 
     const { data, error } = await supabase
@@ -64,6 +69,7 @@ export async function DELETE(req: Request) {
     const { userId } = await auth()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const supabase = getSupabase()
     const { id } = await req.json()
 
     const { error } = await supabase
