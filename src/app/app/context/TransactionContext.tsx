@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { supabase } from '@/lib/supabase'
 
 export type TransactionType = 'income' | 'expense'
 
@@ -49,6 +48,7 @@ type TransactionContextType = {
     transactions: Transaction[]
     loading: boolean
     categories: Category[]
+    refreshTransactions: () => Promise<void>
     addTransaction: (transaction: Omit<Transaction, 'id' | 'created_at'>) => Promise<void>
     updateTransaction: (id: string, transaction: Partial<Transaction>) => Promise<void>
     deleteTransaction: (id: string) => Promise<void>
@@ -62,93 +62,120 @@ type TransactionContextType = {
 
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined)
 
+function guessCategoryFromBank(merchant: string, description: string, type: TransactionType): string {
+    const text = `${merchant || ''} ${description || ''}`.toLowerCase()
+    if (type === 'income') {
+        if (text.match(/salary|payroll|wages/)) return 'salary'
+        if (text.match(/freelance|invoice/)) return 'freelance'
+        if (text.match(/dividend|interest|invest/)) return 'investments'
+        return 'other-income'
+    }
+    if (text.match(/tesco|asda|sainsbury|lidl|aldi|morrisons|waitrose|co-op|marks|m&s food/)) return 'groceries'
+    if (text.match(/restaurant|cafe|coffee|mcdonald|kfc|burger|pizza|nando|subway|deliveroo|uber eat|just eat/)) return 'food'
+    if (text.match(/petrol|fuel|shell|bp |esso|texaco/)) return 'petrol'
+    if (text.match(/uber|taxi|bus|train|tfl|rail|transport|parking/)) return 'transport'
+    if (text.match(/netflix|spotify|amazon prime|disney|apple|youtube|subscription/)) return 'subscriptions'
+    if (text.match(/gym|fitness|sport|swimming|leisure/)) return 'sport'
+    if (text.match(/amazon|ebay|asos|next|zara|h&m|primark|shopping/)) return 'shopping'
+    if (text.match(/electric|gas|water|council|broadband|sky|virgin|bt |ee |vodafone|o2 /)) return 'bills'
+    if (text.match(/rent|mortgage|landlord/)) return 'rent'
+    if (text.match(/pharmacy|doctor|hospital|dental|optician|health/)) return 'health'
+    if (text.match(/hotel|airbnb|flight|holiday|travel|booking\.com/)) return 'travel'
+    if (text.match(/cinema|theatre|entertainment|ticketmaster/)) return 'entertainment'
+    return 'other-expense'
+}
+
+function normalizeTransaction(row: Record<string, unknown>): Transaction {
+    const isBankTx = !row.date && !!row.transacted_at
+    const date = isBankTx
+        ? (row.transacted_at as string).split('T')[0]
+        : row.date as string
+    const type: TransactionType = isBankTx
+        ? ((row.transaction_type as string)?.toUpperCase() === 'CREDIT' ? 'income' : 'expense')
+        : row.type as TransactionType
+    const VALID_IDS = ["salary", "freelance", "investments", "gifts", "other-income", "food", "transport", "petrol", "bills", "shopping", "entertainment", "health", "sport", "groceries", "subscriptions", "travel", "rent", "other-expense"]
+    const stored = row.category as string
+    const category = (stored && VALID_IDS.includes(stored))
+        ? stored
+        : guessCategoryFromBank(row.merchant_name as string, row.description as string, type)
+    return {
+        id: row.id as string,
+        amount: Math.abs(Number(row.amount)),
+        type,
+        category,
+        description: (row.merchant_name as string) || (row.description as string) || '',
+        date,
+        created_at: (row.created_at as string) || date,
+    }
+}
+
 export function TransactionProvider({ children }: { children: ReactNode }) {
     const { user, isLoaded } = useUser()
     const [transactions, setTransactions] = useState<Transaction[]>([])
     const [loading, setLoading] = useState(true)
 
-    // Fetch transactions from Supabase
     const fetchTransactions = useCallback(async () => {
         if (!user?.id) return
-
         setLoading(true)
-        const { data, error } = await supabase
-            .from('transactions')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('date', { ascending: false })
-
-        if (error) {
-            console.error('Error fetching transactions:', error)
-        } else {
-            setTransactions(data || [])
+        try {
+            const res = await fetch('/api/transactions')
+            const data = await res.json()
+            if (Array.isArray(data)) {
+                setTransactions(data.map(normalizeTransaction))
+            } else {
+                console.error('Fetch transactions error:', data)
+            }
+        } catch (e) {
+            console.error('Fetch transactions failed:', e)
         }
         setLoading(false)
     }, [user?.id])
 
     useEffect(() => {
-        if (isLoaded && user?.id) {
-            fetchTransactions()
-        }
+        if (isLoaded && user?.id) fetchTransactions()
     }, [isLoaded, user?.id, fetchTransactions])
 
     const addTransaction = async (transaction: Omit<Transaction, 'id' | 'created_at'>) => {
-        if (!user?.id) return
-
-        const { data, error } = await supabase
-            .from('transactions')
-            .insert([{ ...transaction, user_id: user.id }])
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error adding transaction:', error)
-        } else if (data) {
-            setTransactions(prev => [data, ...prev])
-        }
+        const res = await fetch('/api/transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(transaction),
+        })
+        const data = await res.json()
+        if (data.id) setTransactions(prev => [normalizeTransaction(data), ...prev])
+        else console.error('Add transaction error:', data)
     }
 
     const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
-        const { data, error } = await supabase
-            .from('transactions')
-            .update(updates)
-            .eq('id', id)
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error updating transaction:', error)
-        } else if (data) {
-            setTransactions(prev => prev.map(t => t.id === id ? data : t))
-        }
+        const res = await fetch('/api/transactions', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, ...updates }),
+        })
+        const data = await res.json()
+        if (data.id) setTransactions(prev => prev.map(t => t.id === id ? normalizeTransaction(data) : t))
+        else console.error('Update transaction error:', data)
     }
 
     const deleteTransaction = async (id: string) => {
-        const { error } = await supabase
-            .from('transactions')
-            .delete()
-            .eq('id', id)
-
-        if (error) {
-            console.error('Error deleting transaction:', error)
-        } else {
-            setTransactions(prev => prev.filter(t => t.id !== id))
-        }
+        const res = await fetch('/api/transactions', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id }),
+        })
+        const data = await res.json()
+        if (data.success) setTransactions(prev => prev.filter(t => t.id !== id))
+        else console.error('Delete transaction error:', data)
     }
 
     const getTransactionsByDate = (date: string) => transactions.filter(t => t.date === date)
-
-    const getTransactionsByMonth = (year: number, month: number) => {
-        return transactions.filter(t => {
-            const d = new Date(t.date)
-            return d.getFullYear() === year && d.getMonth() === month
-        })
-    }
-
+    const getTransactionsByMonth = (year: number, month: number) => transactions.filter(t => {
+        const d = new Date(t.date)
+        return d.getFullYear() === year && d.getMonth() === month
+    })
     const getTotalIncome = (txns = transactions) => txns.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
     const getTotalExpenses = (txns = transactions) => txns.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
     const getBalance = (txns = transactions) => getTotalIncome(txns) - getTotalExpenses(txns)
-
     const getCategoryTotals = (type: TransactionType, txns = transactions) => {
         const filtered = txns.filter(t => t.type === type)
         const totals = new Map<string, number>()
@@ -161,8 +188,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
 
     return (
         <TransactionContext.Provider value={{
-            transactions, loading, categories: DEFAULT_CATEGORIES, addTransaction, updateTransaction, deleteTransaction,
-            getTransactionsByDate, getTransactionsByMonth, getTotalIncome, getTotalExpenses, getBalance, getCategoryTotals,
+            transactions, loading, categories: DEFAULT_CATEGORIES,
+            refreshTransactions: fetchTransactions,
+            addTransaction, updateTransaction, deleteTransaction,
+            getTransactionsByDate, getTransactionsByMonth,
+            getTotalIncome, getTotalExpenses, getBalance, getCategoryTotals,
         }}>
             {children}
         </TransactionContext.Provider>
