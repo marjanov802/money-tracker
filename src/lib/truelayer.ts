@@ -1,8 +1,8 @@
 // lib/truelayer.ts
 // Core TrueLayer API helpers — token exchange, refresh, accounts, transactions
 
-const TRUELAYER_AUTH_URL = 'https://auth.truelayer.com'   // remove -sandbox
-const TRUELAYER_API_URL = 'https://api.truelayer.com'    // remove -sandbox // swap to api.truelayer.com in prod
+const TRUELAYER_AUTH_URL = 'https://auth.truelayer-sandbox.com'
+const TRUELAYER_API_URL = 'https://api.truelayer.com'   // remove -sandbox // swap to api.truelayer.com in prod
 
 const CLIENT_ID = process.env.TRUELAYER_CLIENT_ID!
 const CLIENT_SECRET = process.env.TRUELAYER_CLIENT_SECRET!
